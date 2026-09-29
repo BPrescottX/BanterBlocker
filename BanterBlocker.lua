@@ -124,6 +124,9 @@ function ns.InitDB()
       or math.abs(db.minimap.angle) > 10000 then
     db.minimap.angle = 225
   end
+  if db.wordSort ~= "added" and db.wordSort ~= "name" and db.wordSort ~= "count" then
+    db.wordSort = "added"
+  end
 
   -- Validate/repair the named-list structure; migrate v1's flat db.words.
   if type(db.lists) ~= "table" then db.lists = {} end

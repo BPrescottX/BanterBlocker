@@ -21,13 +21,14 @@ you want), each individually toggleable.
   move by dragging the title area and resize with the bottom-right grip.
   Escape or the X closes it. There's also an entry under Options → AddOns.
 - **Lists** (left): create, rename, delete, and enable/disable named lists.
-  Starter lists (Politics, Spam) can be imported with one click.
+  Starter lists (People, Politics, Spam, Slurs, and WoW) can be imported with
+  one click.
 - **Words** (right): add words/phrases to the selected list. Commas work for
   bulk adds (`foo, bar, baz`).
 - **Whole words** (on by default): `ass` matches "ass!" but not "class".
   Turn it off for substring matching.
-- **Apply the filter to**: which chat types get filtered. Public channels,
-  say, and yell are on by default.
+- **Apply the filter to**: which chat types get filtered. Public channels are
+  on by default; all other chat types are off.
 - Filtered messages are hidden and counted (total, per list, per word).
 - **Log to tab** (on by default): blocked messages are copied into a dedicated
   "Blocked" chat tab so you can review what was filtered. Entries show
@@ -36,9 +37,9 @@ you want), each individually toggleable.
   tooltip. Left-click opens settings, right-click pauses/resumes filtering,
   middle-click toggles the blocked-messages tab. Hide it with the "Minimap
   button" checkbox or `/banter minimap`.
-- **Paste list** button opens an import window: name a list, paste a block of
+- **Import list** button opens an import window: name a list, paste a block of
   text copied from a .txt file (newlines, commas or semicolons), done.
-- Test box: check a message against your lists without sending anything.
+- **Export list** opens the selected list as copyable, one-word-per-line text.
 
 ## Large lists
 
@@ -67,7 +68,7 @@ at every login; while enabled, remove words from the file rather than in-game.
 /banter add <words>        Add to the active list (commas OK)
 /banter addto <list> <w>   Add to a named list
 /banter remove <word>      Remove a word from any list
-/banter import <name>      Import a starter list (politics, spam)
+/banter import <name>      Import people|politics|spam|slurs|wow
 /banter test <message>     Check text against your lists
 /banter stats              Blocked counts
 /banter reset confirm      Reset counters

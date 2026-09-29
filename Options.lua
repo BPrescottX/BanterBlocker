@@ -6,6 +6,11 @@ local WIN_W, WIN_H = 640, 680
 local MIN_W, MIN_H = 620, 660
 local MAX_W, MAX_H = 1600, 1400
 
+local ICON_PATH = "Interface\\AddOns\\BanterBlocker\\BanterBlockerIcon.tga"
+local HOMEPAGE = "https://www.deploycat.app"
+local SORT_LABELS = { added = "Added", name = "A-Z", count = "Most used" }
+local SORT_NEXT = { added = "name", name = "count", count = "added" }
+
 local window, settingsPanel
 
 -- ── small control factories ─────────────────────────────────────────────────
@@ -99,6 +104,25 @@ if not StaticPopupDialogs["BANTERBLOCKER_NAME_LIST"] then
       if data then ns.DeleteList(data.name) end
     end,
   }
+  -- WoW can't open a browser, so the "hyperlink" shows a copyable URL.
+  StaticPopupDialogs["BANTERBLOCKER_URL"] = {
+    text = "Copy this link:",
+    button1 = "Done",
+    hasEditBox = true,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    exclusive = true,
+    preferredIndex = 3,
+    OnShow = function(self)
+      local eb = self.editBox or self.EditBox
+      if eb then
+        eb:SetText(HOMEPAGE)
+        eb:HighlightText()
+        eb:SetFocus()
+      end
+    end,
+  }
 end
 
 local function popupNameList(action, name)
@@ -170,14 +194,32 @@ local function createWindow()
   end)
   grip:SetScript("OnMouseUp", function() window:StopMovingOrSizing() end)
 
-  label(window, "BanterBlocker  |cff8c8c8cv" .. ns.version .. "|r", 20, -16, 460, "GameFontNormalLarge")
-  label(window, "Hide chat messages containing words from your lists.", 22, -42, 540)
+  local titleIcon = window:CreateTexture(nil, "ARTWORK")
+  titleIcon:SetTexture(ICON_PATH)
+  titleIcon:SetSize(24, 24)
+  titleIcon:SetPoint("TOPLEFT", 16, -11)
+  label(window, "BanterBlocker  |cff8c8c8cv" .. ns.version .. "|r", 48, -16, 460, "GameFontNormalLarge")
+  label(window, "Free Trade Chat! Leave the real world behind and enjoy Azeroth!", 22, -42, 540)
 
   -- Global options, two rows
-  window.cbEnabled = checkbox(window, "Enable filtering", 20, -66, 140,
-    function() return ns.db.enabled end,
-    function(v) ns.db.enabled = v; ns.RefreshStatus() end)
-  window.cbWhole = checkbox(window, "Whole words", 170, -66, 120,
+  window.filterButton = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
+  window.filterButton:SetSize(150, 34)
+  window.filterButton:SetPoint("TOPRIGHT", window, "TOPRIGHT", -20, -62)
+  window.filterButton:SetScript("OnClick", function()
+    ns.db.enabled = not ns.db.enabled
+    ns.RefreshStatus()
+  end)
+  local function updateFilterButton()
+    local enabled = ns.db.enabled
+    window.filterButton:SetText(enabled and "Filtering ON" or "Filtering OFF")
+    for _, region in ipairs({ window.filterButton:GetRegions() }) do
+      if region:GetObjectType() == "Texture" then
+        region:SetDesaturated(enabled)
+        region:SetVertexColor(enabled and 0.2 or 1, 1, enabled and 0.2 or 1)
+      end
+    end
+  end
+  window.cbWhole = checkbox(window, "Whole words", 20, -66, 120,
     function() return ns.db.wholeWords end,
     function(v) ns.db.wholeWords = v; ns.RebuildMatcher(); ns.RefreshStatus() end)
   window.cbOwn = checkbox(window, "Hide my messages", 20, -90, 140,
@@ -284,7 +326,7 @@ local function createWindow()
   window.listHeader = label(window, "", 222, -226, 400, "GameFontNormal")
 
   local addBox = CreateFrame("EditBox", "BanterBlockerAddBox", window, "InputBoxTemplate")
-  addBox:SetSize(280, 26)
+  addBox:SetSize(178, 26)
   addBox:SetPoint("TOPLEFT", window, "TOPLEFT", 226, -250)
   addBox:SetAutoFocus(false)
   addBox:SetMaxLetters(4096)
@@ -310,14 +352,14 @@ local function createWindow()
     addBox:ClearFocus()
   end
 
-  local addBtn = button(window, "Add", 514, -251, 60, tryAdd)
+  local addBtn = button(window, "Add", 412, -251, 60, tryAdd)
   addBtn:SetHeight(24)
   addBox:SetScript("OnEnterPressed", tryAdd)
 
   -- The word list box stretches with the window.
   local wordsBox = boxed(window)
   wordsBox:SetPoint("TOPLEFT", window, "TOPLEFT", 222, -282)
-  wordsBox:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -20, 150)
+  wordsBox:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -20, 120)
 
   local wordsScroll = CreateFrame("ScrollFrame", "BanterBlockerWordsScroll", wordsBox, "UIPanelScrollFrameTemplate")
   wordsScroll:SetPoint("TOPLEFT", 4, -4)
@@ -354,13 +396,29 @@ local function createWindow()
   RefreshWords = function()
     local list = ns.ActiveList()
     local words = list and list.words or {}
+    -- Display order only; list.words itself keeps insertion order for the matcher.
+    local sorted = words
+    if #words > 1 and ns.db.wordSort ~= "added" then
+      sorted = {}
+      for i, w in ipairs(words) do sorted[i] = w end
+      if ns.db.wordSort == "count" then
+        local counts = ns.db.stats.byWord
+        table.sort(sorted, function(a, b)
+          local ca, cb = counts[a] or 0, counts[b] or 0
+          if ca ~= cb then return ca > cb end
+          return a < b
+        end)
+      else
+        table.sort(sorted)
+      end
+    end
     local visRows = math.max(1, math.floor(wordsScroll:GetHeight() / ROW_H))
     ensureWordRows(visRows)
     local rowW = math.max(80, wordsChild:GetWidth())
     local offset = math.floor(wordsScroll:GetVerticalScroll() / ROW_H + 0.5)
     for i, row in ipairs(wordRows) do
       local idx = offset + i
-      local word = words[idx]
+      local word = sorted[idx]
       if i <= visRows and word then
         row:SetWidth(rowW)
         row:SetPoint("TOPLEFT", 0, -(idx - 1) * ROW_H)
@@ -373,8 +431,8 @@ local function createWindow()
         row:Hide()
       end
     end
-    wordsChild:SetHeight(math.max(#words * ROW_H, 1))
-    emptyText:SetShown(#words == 0)
+    wordsChild:SetHeight(math.max(#sorted * ROW_H, 1))
+    emptyText:SetShown(#sorted == 0)
     window.listHeader:SetText(list
       and string.format("Words in '%s'  |cff8c8c8c%d words, %s hidden|r", list.name,
         #words, ns.FormatCount(ns.db.stats.byList[list.name] or 0))
@@ -410,46 +468,44 @@ local function createWindow()
   local pasteBtn = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
   pasteBtn:SetSize(90, 22)
   pasteBtn:SetPoint("TOPRIGHT", wordsBox, "BOTTOMRIGHT", 0, -4)
-  pasteBtn:SetText("Paste list")
+  pasteBtn:SetText("Import list")
   pasteBtn:SetScript("OnClick", function() ns.OpenImport() end)
 
-  -- ── bottom strip: anchored to the window's bottom edge so it follows resize ──
-  local testLabel = label(window, "Test a message:", 0, 0, 300, "GameFontNormal")
-  testLabel:ClearAllPoints()
-  testLabel:SetPoint("BOTTOMLEFT", window, "BOTTOMLEFT", 22, 122)
+  local exportBtn = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
+  exportBtn:SetSize(90, 22)
+  exportBtn:SetPoint("RIGHT", clearBtn, "LEFT", -6, 0)
+  exportBtn:SetText("Export list")
+  exportBtn:SetScript("OnClick", function()
+    local list = ns.ActiveList()
+    if list then ns.OpenExport(list.name) else ns.Print("Select a list first.") end
+  end)
 
-  local testBox = CreateFrame("EditBox", "BanterBlockerTestBox", window, "InputBoxTemplate")
-  testBox:SetPoint("BOTTOMLEFT", window, "BOTTOMLEFT", 24, 94)
-  testBox:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -100, 94)
-  testBox:SetHeight(24)
-  testBox:SetAutoFocus(false)
-  testBox:SetMaxLetters(1024)
-  testBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-  window.testResult = label(window, "", 0, 0, 560)
-  window.testResult:ClearAllPoints()
-  window.testResult:SetPoint("BOTTOMLEFT", window, "BOTTOMLEFT", 24, 70)
-  window.testResult:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -24, 70)
-
-  local function runTest()
-    local entry = Engine.Match(Engine.VisibleText(testBox:GetText() or ""), ns.matcher, ns.db.wholeWords)
-    if entry then
-      window.testResult:SetText("|cffffb36bMATCH: " .. entry.word:gsub("|", "||")
-        .. "  (list: " .. entry.list:gsub("|", "||") .. ")|r")
-    else
-      window.testResult:SetText("|cff88d899No match.|r")
-    end
+  -- Display-order cycle for the word list; the stored order is untouched.
+  local sortBtn = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
+  sortBtn:SetSize(120, 22)
+  sortBtn:SetPoint("LEFT", addBtn, "RIGHT", 8, 0)
+  local function updateSortBtn()
+    sortBtn:SetText("Sort: " .. (SORT_LABELS[ns.db.wordSort] or SORT_LABELS.added))
   end
-  local testBtn = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
-  testBtn:SetSize(60, 24)
-  testBtn:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -24, 92)
-  testBtn:SetText("Test")
-  testBtn:SetScript("OnClick", runTest)
-  testBox:SetScript("OnEnterPressed", runTest)
+  sortBtn:SetScript("OnClick", function()
+    ns.db.wordSort = SORT_NEXT[ns.db.wordSort] or "added"
+    updateSortBtn()
+    RefreshWords()
+  end)
+  sortBtn:SetScript("OnEnter", function(self)
+    if not GameTooltip then return end
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:AddLine("Word order", 1, 1, 1)
+    GameTooltip:AddLine("Added: order words were entered. A-Z: alphabetical. Most used: highest block count first.", 0.9, 0.9, 0.9, true)
+    GameTooltip:Show()
+  end)
+  sortBtn:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+  updateSortBtn()
 
   -- Footer band: framed stats + status, visually distinct from the window body.
   local footer = boxed(window)
-  footer:SetPoint("BOTTOMLEFT", window, "BOTTOMLEFT", 20, 14)
-  footer:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -30, 14)
+  footer:SetPoint("BOTTOMLEFT", window, "BOTTOMLEFT", 20, 24)
+  footer:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -30, 24)
   footer:SetHeight(46)
   if footer.SetBackdropBorderColor then
     footer:SetBackdropBorderColor(0.25, 0.65, 0.55, 0.9) -- teal accent, not gold
@@ -489,14 +545,31 @@ local function createWindow()
     ns.ResetStats()
   end)
 
+  -- Credit line along the bottom edge; the whole line acts as a link.
+  local credit = CreateFrame("Button", nil, window)
+  credit:SetPoint("BOTTOMLEFT", window, "BOTTOMLEFT", 20, 6)
+  credit:SetSize(470, 14)
+  local creditText = credit:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  creditText:SetAllPoints()
+  creditText:SetJustifyH("LEFT")
+  local CREDIT_TEXT = "Developed by the team behind www.deploycat.app - Game Hosting"
+  creditText:SetText("|cff5f9fdf" .. CREDIT_TEXT .. "|r")
+  credit:SetScript("OnEnter", function()
+    creditText:SetText("|cff9fd0ff" .. CREDIT_TEXT .. "|r")
+  end)
+  credit:SetScript("OnLeave", function()
+    creditText:SetText("|cff5f9fdf" .. CREDIT_TEXT .. "|r")
+  end)
+  credit:SetScript("OnClick", function() StaticPopup_Show("BANTERBLOCKER_URL") end)
+
   function window.RefreshStatus()
     window.totalVal:SetText("|cff59f0c8" .. ns.FormatCount(ns.db.stats.total) .. "|r")
     window.sessionVal:SetText("|cff59f0c8" .. ns.FormatCount(ns.sessionBlocked or 0) .. "|r")
     window.status:SetText(ns.StatusText())
+    updateFilterButton()
   end
 
   local function RefreshAll()
-    window.cbEnabled:SetChecked(ns.db.enabled)
     window.cbWhole:SetChecked(ns.db.wholeWords)
     window.cbOwn:SetChecked(ns.db.filterOwn)
     window.cbLog:SetChecked(ns.db.logTab)
@@ -518,7 +591,6 @@ local function createWindow()
   end)
   window:SetScript("OnHide", function()
     addBox:ClearFocus()
-    testBox:ClearFocus()
   end)
 
   window.RefreshAll = RefreshAll
@@ -565,10 +637,10 @@ local function createImportWindow()
     UISpecialFrames[#UISpecialFrames + 1] = "BanterBlockerImport"
   end
 
-  label(f, "Import a word list", 18, -14, 400, "GameFontNormalLarge")
-  label(f, "Paste words or phrases copied from a text file. New lines, commas or semicolons separate entries.", 18, -40, 460)
+  f.title = label(f, "Import a word list", 18, -14, 400, "GameFontNormalLarge")
+  f.description = label(f, "Paste words or phrases copied from a text file. New lines, commas or semicolons separate entries.", 18, -40, 460)
 
-  label(f, "List name (created if it doesn't exist):", 18, -72, 300)
+  f.nameLabel = label(f, "List name (created if it doesn't exist):", 18, -72, 300)
   local nameBox = CreateFrame("EditBox", "BanterBlockerImportName", f, "InputBoxTemplate")
   nameBox:SetSize(240, 24)
   nameBox:SetPoint("TOPLEFT", f, "TOPLEFT", 22, -92)
@@ -624,7 +696,7 @@ local function createImportWindow()
 
   f.status = label(f, "", 18, -308, 270)
 
-  button(f, "Import", 300, -304, 90, function()
+  f.importButton = button(f, "Import", 300, -304, 90, function()
     local name = Engine.Trim(nameBox:GetText() or "")
     if name == "" then
       f.status:SetText("|cffff8c8cGive the list a name first.|r")
@@ -654,11 +726,17 @@ local function createImportWindow()
   button(f, "Close", 400, -304, 80, function() f:Hide() end)
 
   f:SetScript("OnShow", function()
-    if f.nameBox:GetText() == "" then
-      local active = ns.ActiveList()
-      if active then f.nameBox:SetText(active.name) end
+    if f.exportMode then
+      f.status:SetText("Select all text and press Ctrl+C to copy.")
+      f.edit:SetFocus()
+      f.edit:HighlightText()
+    else
+      if f.nameBox:GetText() == "" then
+        local active = ns.ActiveList()
+        if active then f.nameBox:SetText(active.name) end
+      end
+      f.status:SetText("")
     end
-    f.status:SetText("")
   end)
   f:Hide()
   return f
@@ -666,8 +744,40 @@ end
 
 function ns.OpenImport()
   local f = importWin or createImportWindow()
+  if f.exportMode then f.edit:SetText("") end
+  f.exportMode = false
+  f.title:SetText("Import a word list")
+  f.description:SetText("Paste words or phrases copied from a text file. New lines, commas or semicolons separate entries.")
+  f.nameLabel:SetText("List name (created if it doesn't exist):")
+  f.nameBox:Show()
+  f.importButton:Show()
   f:Show()
   f:Raise()
+end
+
+function ns.OpenExport(name)
+  local list = ns.FindList(name)
+  if not list then
+    ns.Print("List not found.")
+    return
+  end
+  local f = importWin or createImportWindow()
+  f.exportMode = true
+  f.exportListEmpty = #list.words == 0
+  f.title:SetText("Export a word list")
+  f.description:SetText("Copy these words to back up or transfer this list.")
+  f.nameLabel:SetText("List: " .. list.name)
+  f.nameBox:SetText(list.name)
+  f.nameBox:Hide()
+  f.importButton:Hide()
+  f.edit:SetText(table.concat(list.words, "\n"))
+  f:Show()
+  f:Raise()
+  f.status:SetText(f.exportListEmpty and "This list is empty." or "Select all text and press Ctrl+C to copy.")
+  if not f.exportListEmpty then
+    f.edit:SetFocus()
+    f.edit:HighlightText()
+  end
 end
 
 -- A minimal entry in the native Settings list that opens the real window;
@@ -746,10 +856,10 @@ function ns.CreateMinimapButton()
   b:RegisterForDrag("LeftButton")
 
   local icon = b:CreateTexture(nil, "BACKGROUND")
-  icon:SetTexture("Interface\\Icons\\INV_Misc_Bell_01")
-  icon:SetSize(20, 20)
-  icon:SetPoint("CENTER")
-  icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+  icon:SetTexture(ICON_PATH)
+  icon:SetSize(21, 21)
+  icon:SetPoint("CENTER", b, "CENTER", 0, -2)
+  icon:SetTexCoord(0.02, 0.98, 0.02, 0.98)
 
   local border = b:CreateTexture(nil, "OVERLAY")
   border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
